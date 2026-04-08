@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 import traceback
+import urllib.request
 
 import runpod
 import trimesh
@@ -192,20 +193,26 @@ def handler(job):
     target_tris = int(job_input.get("target_tris", 4000))
     clothing_type = job_input.get("clothing_type", "shirt")
     glb_b64 = job_input.get("glb")
+    glb_url = job_input.get("glb_url")
 
     print(f"[handler] Job {job_id} | mode={mode} | target_tris={target_tris} | clothing_type={clothing_type}")
 
-    if not glb_b64:
-        return {"error": "Missing required field: input.glb (base64-encoded GLB)"}
+    if not glb_b64 and not glb_url:
+        return {"error": "Missing required field: input.glb (base64) or input.glb_url (URL)"}
 
     if mode not in ("remesh", "roblox_lc"):
         return {"error": f"Unknown mode '{mode}'. Must be 'remesh' or 'roblox_lc'."}
 
     with tempfile.TemporaryDirectory(prefix="mesh_tools_") as work_dir:
         try:
-            # Decode input GLB
+            # Get input GLB (from base64 or URL)
             input_glb = os.path.join(work_dir, "input.glb")
-            decode_glb(glb_b64, input_glb)
+            if glb_url:
+                print(f"[handler] Downloading GLB from URL: {glb_url[:80]}...")
+                urllib.request.urlretrieve(glb_url, input_glb)
+                print(f"[handler] Downloaded: {file_size_mb(input_glb)} MB")
+            else:
+                decode_glb(glb_b64, input_glb)
 
             if mode == "remesh":
                 result = handle_remesh(input_glb, target_tris, work_dir)
