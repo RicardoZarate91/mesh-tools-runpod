@@ -55,24 +55,22 @@ def run_retopo(input_glb, output_glb, target_tris=4000):
     else:
         mesh = scene
 
-    # Save as OBJ for PyMeshLab
-    temp_obj = output_glb.replace('.glb', '_temp.obj')
-    mesh.export(temp_obj)
-    print(f"[postprocess] Converted GLB → OBJ: {temp_obj}")
+    # Save as PLY for PyMeshLab (reliably supported in all builds)
+    temp_ply = output_glb.replace('.glb', '_temp.ply')
+    mesh.export(temp_ply)
+    print(f"[postprocess] Converted GLB → PLY: {temp_ply}")
     print(f"[postprocess] Input mesh: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
 
     # Run retopology
-    temp_retopo_obj = output_glb.replace('.glb', '_retopo.obj')
-    stats = retopologize(temp_obj, temp_retopo_obj, target_tris)
+    temp_retopo_ply = output_glb.replace('.glb', '_retopo.ply')
+    stats = retopologize(temp_ply, temp_retopo_ply, target_tris)
 
     # Convert back to GLB
-    retopo_mesh = trimesh.load(temp_retopo_obj)
+    retopo_mesh = trimesh.load(temp_retopo_ply)
     retopo_mesh.export(output_glb)
 
     # Cleanup temp files
-    for f in [temp_obj, temp_retopo_obj,
-              temp_obj.replace('.obj', '.mtl'),
-              temp_retopo_obj.replace('.obj', '.mtl')]:
+    for f in [temp_ply, temp_retopo_ply]:
         if os.path.exists(f):
             os.remove(f)
 
