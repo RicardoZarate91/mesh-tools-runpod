@@ -1,21 +1,23 @@
-FROM python:3.10-slim
+FROM ubuntu:22.04
+LABEL org.opencontainers.image.source=https://github.com/RicardoZarate91/mesh-tools-runpod
 
-# Install system deps: blender + build essentials for pymeshlab
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# System deps: Python, Blender, OpenGL libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev \
     blender \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libgomp1 \
+    libgl1-mesa-glx libegl-mesa0 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages
-RUN pip install --no-cache-dir \
+# Python packages
+RUN pip3 install --no-cache-dir \
     runpod \
     pymeshlab \
     trimesh \
     numpy
 
-# Set up working directory
 WORKDIR /app
 
 # Copy pipeline scripts
