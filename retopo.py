@@ -51,14 +51,7 @@ def retopologize(input_path, output_path, target_tris=4000):
     # This uses fast-simplification under the hood (Quadric Edge Collapse)
     print(f"[retopo] Decimating {original_faces} -> {target_tris} faces...")
 
-    try:
-        decimated = mesh.simplify_quadric_decimation(target_tris)
-    except Exception as e:
-        print(f"[retopo] Quadric decimation failed ({e}), trying vertex clustering...")
-        # Fallback: vertex clustering (less quality but always works)
-        ratio = target_tris / max(original_faces, 1)
-        pitch = mesh.extents.max() * (1 - ratio) * 0.5
-        decimated = mesh.simplify_quadric_decimation(target_tris)
+    decimated = mesh.simplify_quadric_decimation(face_count=target_tris)
 
     final_faces = len(decimated.faces)
     final_verts = len(decimated.vertices)
