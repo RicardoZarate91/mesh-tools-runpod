@@ -23,6 +23,7 @@ WORKDIR /app
 # Copy pipeline scripts
 COPY handler.py .
 COPY retopo.py .
+COPY blender_decimate.py .
 COPY blender_postprocess.py .
 COPY postprocess_clothing.py .
 

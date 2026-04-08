@@ -2,30 +2,92 @@
 """
 retopo.py — Retopologize a mesh to a target triangle count.
 
-Uses trimesh + fast-simplification for quadric edge collapse decimation.
-No pymeshlab dependency (pymeshlab pip builds have broken format plugins).
+Uses Blender's Decimate modifier (headless) which preserves:
+  - UV maps and textures
+  - Materials and vertex colors
+  - Clean topology at high reduction ratios
+
+Falls back to trimesh + fast-simplification if Blender is not available
+(but trimesh strips UVs/textures).
 
 Usage:
     python retopo.py --input input.glb --output output.glb --target-tris 4000
 """
 
 import argparse
+import subprocess
 import sys
 import os
+import json
+
+BLENDER_BIN = '/usr/bin/blender'
 
 
 def retopologize(input_path, output_path, target_tris=4000):
     """
-    Decimate mesh to target triangle count with quality preservation.
+    Decimate mesh to target triangle count, preserving textures.
 
-    Steps:
-    1. Load mesh (any format trimesh supports)
-    2. Quadric edge collapse decimation to target
-    3. Save result
+    Uses Blender headless for UV/texture-preserving decimation.
+    Falls back to trimesh if Blender is unavailable.
     """
+    blender_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'blender_decimate.py')
+
+    if os.path.exists(BLENDER_BIN) and os.path.exists(blender_script):
+        return _retopo_blender(input_path, output_path, target_tris, blender_script)
+    else:
+        print("[retopo] Blender not available, falling back to trimesh (no texture preservation)")
+        return _retopo_trimesh(input_path, output_path, target_tris)
+
+
+def _retopo_blender(input_path, output_path, target_tris, blender_script):
+    """Run Blender headless decimation."""
+    cmd = [
+        BLENDER_BIN,
+        '--background',
+        '--python', blender_script,
+        '--',
+        '--input', input_path,
+        '--output', output_path,
+        '--target-tris', str(target_tris),
+    ]
+
+    print(f"[retopo] Running Blender decimate: {target_tris} target tris")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+    # Parse stats from stdout
+    stats = None
+    for line in (result.stdout or '').split('\n'):
+        if line.startswith('RETOPO_STATS:'):
+            stats = json.loads(line[len('RETOPO_STATS:'):])
+        if '[blender_decimate]' in line:
+            print(line.strip())
+
+    if result.returncode != 0:
+        stderr_tail = (result.stderr or '')[-500:]
+        print(f"[retopo] Blender stderr: {stderr_tail}")
+        raise RuntimeError(f"Blender decimate failed (exit {result.returncode})")
+
+    if not os.path.exists(output_path):
+        raise RuntimeError("Blender decimate produced no output file")
+
+    if stats:
+        print(f"[retopo] Result: {stats['final_verts']} verts, {stats['final_faces']} tris ({stats['reduction_pct']}% reduction)")
+        return stats
+
+    # If we couldn't parse stats, return minimal info
+    return {
+        'original_faces': 0,
+        'original_verts': 0,
+        'final_faces': target_tris,
+        'final_verts': 0,
+        'reduction_pct': 0.0,
+    }
+
+
+def _retopo_trimesh(input_path, output_path, target_tris):
+    """Fallback: trimesh decimation (strips UVs/textures)."""
     import trimesh
 
-    # Load mesh
     loaded = trimesh.load(input_path, force='mesh')
     if isinstance(loaded, trimesh.Scene):
         mesh = trimesh.util.concatenate(loaded.dump())
@@ -37,7 +99,7 @@ def retopologize(input_path, output_path, target_tris=4000):
     print(f"[retopo] Input: {original_verts} vertices, {original_faces} faces")
 
     if original_faces <= target_tris:
-        print(f"[retopo] Already under target ({original_faces} <= {target_tris}), skipping decimation")
+        print(f"[retopo] Already under target ({original_faces} <= {target_tris}), skipping")
         mesh.export(output_path)
         return {
             'original_faces': original_faces,
@@ -47,22 +109,15 @@ def retopologize(input_path, output_path, target_tris=4000):
             'reduction_pct': 0.0,
         }
 
-    # Decimate using trimesh's built-in quadric decimation
-    # This uses fast-simplification under the hood (Quadric Edge Collapse)
     print(f"[retopo] Decimating {original_faces} -> {target_tris} faces...")
-
     decimated = mesh.simplify_quadric_decimation(face_count=target_tris)
 
     final_faces = len(decimated.faces)
     final_verts = len(decimated.vertices)
-    print(f"[retopo] Output: {final_verts} vertices, {final_faces} faces")
     reduction = round((1 - final_faces / max(original_faces, 1)) * 100, 1)
-    print(f"[retopo] Reduction: {original_faces} -> {final_faces} ({reduction}%)")
+    print(f"[retopo] Output: {final_verts} verts, {final_faces} faces ({reduction}% reduction)")
 
-    # Save
     decimated.export(output_path)
-    print(f"[retopo] Saved to {output_path}")
-
     return {
         'original_faces': original_faces,
         'original_verts': original_verts,
