@@ -68,30 +68,12 @@ def handle_remesh(input_glb_path, target_tris, work_dir):
     """
     t0 = time.time()
 
-    # GLB -> PLY (PyMeshLab reliably supports PLY in all builds)
-    scene = trimesh.load(input_glb_path, force="scene")
-    if isinstance(scene, trimesh.Scene):
-        mesh = trimesh.util.concatenate(scene.dump())
-    else:
-        mesh = scene
-
-    input_ply = os.path.join(work_dir, "input.ply")
-    mesh.export(input_ply)
-    original_faces = len(mesh.faces)
-    original_verts = len(mesh.vertices)
-    print(f"[handler] Input mesh: {original_verts} verts, {original_faces} faces")
-
-    # Retopologize
+    # Retopologize directly (trimesh handles GLB natively)
     sys.path.insert(0, os.path.dirname(__file__))
     from retopo import retopologize
 
-    output_ply = os.path.join(work_dir, "output.ply")
-    stats = retopologize(input_ply, output_ply, target_tris)
-
-    # PLY -> GLB
-    retopo_mesh = trimesh.load(output_ply)
     output_glb = os.path.join(work_dir, "output.glb")
-    retopo_mesh.export(output_glb)
+    stats = retopologize(input_glb_path, output_glb, target_tris)
 
     elapsed = time.time() - t0
 

@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python packages
 RUN pip3 install --no-cache-dir \
     runpod \
-    pymeshlab \
     trimesh \
+    fast-simplification \
     numpy
 
 WORKDIR /app

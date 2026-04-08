@@ -44,35 +44,8 @@ def run_retopo(input_glb, output_glb, target_tris=4000):
     sys.path.insert(0, os.path.dirname(__file__))
     from retopo import retopologize
 
-    # PyMeshLab can't read GLB directly — convert via trimesh first
-    import trimesh
-
-    # Load GLB
-    scene = trimesh.load(input_glb, force='scene')
-    if isinstance(scene, trimesh.Scene):
-        # Merge all meshes into one
-        mesh = scene.dump(concatenate=True) if hasattr(scene, 'dump') else trimesh.util.concatenate(scene.dump())
-    else:
-        mesh = scene
-
-    # Save as PLY for PyMeshLab (reliably supported in all builds)
-    temp_ply = output_glb.replace('.glb', '_temp.ply')
-    mesh.export(temp_ply)
-    print(f"[postprocess] Converted GLB → PLY: {temp_ply}")
-    print(f"[postprocess] Input mesh: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
-
-    # Run retopology
-    temp_retopo_ply = output_glb.replace('.glb', '_retopo.ply')
-    stats = retopologize(temp_ply, temp_retopo_ply, target_tris)
-
-    # Convert back to GLB
-    retopo_mesh = trimesh.load(temp_retopo_ply)
-    retopo_mesh.export(output_glb)
-
-    # Cleanup temp files
-    for f in [temp_ply, temp_retopo_ply]:
-        if os.path.exists(f):
-            os.remove(f)
+    # Retopologize directly (trimesh handles GLB natively, no format conversion needed)
+    stats = retopologize(input_glb, output_glb, target_tris)
 
     elapsed = time.time() - start
     print(f"[postprocess] Retopology complete in {elapsed:.1f}s")
