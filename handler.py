@@ -80,8 +80,8 @@ def handle_remesh(input_glb_path, target_tris, work_dir):
     return {
         "glb": encode_file(output_glb),
         "glb_size_mb": file_size_mb(output_glb),
-        "original_faces": original_faces,
-        "original_verts": original_verts,
+        "original_faces": stats["original_faces"],
+        "original_verts": stats["original_verts"],
         "final_faces": stats["final_faces"],
         "final_verts": stats["final_verts"],
         "reduction_pct": stats["reduction_pct"],
