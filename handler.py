@@ -3,16 +3,18 @@
 handler.py -- RunPod serverless handler for mesh post-processing.
 
 CPU-only endpoint. No AI models, just mesh tools:
-  - "remesh":    Retopologize a GLB to a target tri count (PyMeshLab)
-  - "roblox_lc": Full Roblox Layered Clothing pipeline (retopo + Blender fit/cage/rig)
+  - "remesh":           Retopologize a GLB to a target tri count (PyMeshLab)
+  - "roblox_lc":        Full Roblox Layered Clothing pipeline (retopo + Blender fit/cage/rig)
+  - "roblox_accessory": Roblox Rigid Accessory pipeline (position + parent to bone + FBX)
 
 Input:
   {
     "input": {
       "glb": "<base64-encoded GLB>",
-      "mode": "remesh" | "roblox_lc",
+      "mode": "remesh" | "roblox_lc" | "roblox_accessory",
       "target_tris": 4000,
-      "clothing_type": "shirt"   // roblox_lc only
+      "clothing_type": "shirt",       // roblox_lc only
+      "accessory_type": "hat"         // roblox_accessory only
     }
   }
 """
@@ -163,6 +165,108 @@ def handle_roblox_lc(input_glb_path, target_tris, clothing_type, work_dir):
 
 
 # ---------------------------------------------------------------------------
+# Mode: roblox_accessory
+# ---------------------------------------------------------------------------
+
+def handle_roblox_accessory(input_glb_path, target_tris, accessory_type, work_dir):
+    """
+    Roblox Rigid Accessory pipeline:
+      1. Optional retopology (if over target_tris)
+      2. Blender: position at attachment point, parent to bone, export FBX
+    Returns dict with GLB, FBX (all base64) + metadata.
+    """
+    t0 = time.time()
+
+    output_dir = os.path.join(work_dir, "accessory_output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Step 1: Retopologize if needed
+    mesh_to_process = input_glb_path
+    retopo_stats = None
+
+    # Check tri count and retopo if over target
+    try:
+        mesh = trimesh.load(input_glb_path, force='mesh')
+        input_faces = len(mesh.faces)
+        print(f"[handler] Input mesh: {input_faces} faces (target: {target_tris})")
+
+        if input_faces > target_tris * 1.1:  # 10% tolerance
+            print(f"[handler] Retopologizing {input_faces} -> {target_tris} tris")
+            sys.path.insert(0, os.path.dirname(__file__))
+            from retopo import retopologize
+            retopo_glb = os.path.join(work_dir, "retopo.glb")
+            retopo_stats = retopologize(input_glb_path, retopo_glb, target_tris)
+            mesh_to_process = retopo_glb
+            print(f"[handler] Retopo done: {retopo_stats['final_faces']} faces")
+        else:
+            print(f"[handler] Mesh already within target, skipping retopo")
+    except Exception as e:
+        print(f"[handler] WARNING: Could not check tri count: {e}")
+
+    # Step 2: Run Blender accessory pipeline
+    blender_script = os.path.join(os.path.dirname(__file__), "blender_accessory.py")
+
+    preview_glb = os.path.join(output_dir, "accessory_preview.glb")
+    roblox_fbx = os.path.join(output_dir, "accessory_roblox.fbx")
+    processed_glb = os.path.join(output_dir, "accessory_processed.glb")
+    meta_json = os.path.join(output_dir, "metadata.json")
+
+    cmd = [
+        "blender", "--background", "--python", blender_script, "--",
+        "--input", mesh_to_process,
+        "--output", roblox_fbx,
+        "--output-glb", processed_glb,
+        "--output-preview-glb", preview_glb,
+        "--accessory-type", accessory_type,
+        "--templates-dir", "/opt/roblox-templates",
+        "--meta-output", meta_json,
+    ]
+    print(f"[handler] Running: {' '.join(cmd)}")
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+    if result.stdout:
+        for line in result.stdout.strip().split("\n"):
+            print(f"  {line}")
+    if result.returncode != 0:
+        stderr_tail = result.stderr[-2000:] if result.stderr else "(no stderr)"
+        raise RuntimeError(
+            f"blender_accessory.py failed (exit {result.returncode}):\n{stderr_tail}"
+        )
+
+    elapsed = time.time() - t0
+
+    # Read metadata
+    metadata = {}
+    if os.path.exists(meta_json):
+        with open(meta_json) as f:
+            metadata = json.load(f)
+
+    # Add retopo stats to metadata
+    if retopo_stats:
+        metadata['retopo'] = retopo_stats
+
+    response = {
+        "elapsed_sec": round(elapsed, 2),
+        "metadata": metadata,
+    }
+
+    if os.path.exists(processed_glb):
+        response["glb"] = encode_file(processed_glb)
+        response["glb_size_mb"] = file_size_mb(processed_glb)
+
+    if os.path.exists(roblox_fbx):
+        response["fbx"] = encode_file(roblox_fbx)
+        response["fbx_size_mb"] = file_size_mb(roblox_fbx)
+
+    if os.path.exists(preview_glb):
+        response["preview_glb"] = encode_file(preview_glb)
+        response["preview_glb_size_mb"] = file_size_mb(preview_glb)
+
+    return response
+
+
+# ---------------------------------------------------------------------------
 # RunPod handler
 # ---------------------------------------------------------------------------
 
@@ -174,16 +278,17 @@ def handler(job):
     mode = job_input.get("mode", "remesh")
     target_tris = int(job_input.get("target_tris", 4000))
     clothing_type = job_input.get("clothing_type", "shirt")
+    accessory_type = job_input.get("accessory_type", "hat")
     glb_b64 = job_input.get("glb")
     glb_url = job_input.get("glb_url")
 
-    print(f"[handler] Job {job_id} | mode={mode} | target_tris={target_tris} | clothing_type={clothing_type}")
+    print(f"[handler] Job {job_id} | mode={mode} | target_tris={target_tris} | clothing_type={clothing_type} | accessory_type={accessory_type}")
 
     if not glb_b64 and not glb_url:
         return {"error": "Missing required field: input.glb (base64) or input.glb_url (URL)"}
 
-    if mode not in ("remesh", "roblox_lc"):
-        return {"error": f"Unknown mode '{mode}'. Must be 'remesh' or 'roblox_lc'."}
+    if mode not in ("remesh", "roblox_lc", "roblox_accessory"):
+        return {"error": f"Unknown mode '{mode}'. Must be 'remesh', 'roblox_lc', or 'roblox_accessory'."}
 
     with tempfile.TemporaryDirectory(prefix="mesh_tools_") as work_dir:
         try:
@@ -198,8 +303,10 @@ def handler(job):
 
             if mode == "remesh":
                 result = handle_remesh(input_glb, target_tris, work_dir)
-            else:
+            elif mode == "roblox_lc":
                 result = handle_roblox_lc(input_glb, target_tris, clothing_type, work_dir)
+            elif mode == "roblox_accessory":
+                result = handle_roblox_accessory(input_glb, target_tris, accessory_type, work_dir)
 
             result["mode"] = mode
             result["status"] = "success"

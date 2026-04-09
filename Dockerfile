@@ -25,6 +25,7 @@ COPY handler.py .
 COPY retopo.py .
 COPY blender_decimate.py .
 COPY blender_postprocess.py .
+COPY blender_accessory.py .
 COPY postprocess_clothing.py .
 
 # Copy Roblox templates
